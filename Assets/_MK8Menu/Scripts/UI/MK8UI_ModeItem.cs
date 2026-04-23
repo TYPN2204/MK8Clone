@@ -25,10 +25,13 @@ namespace MK8.Menu.UI
         // ── Properties ───────────────────────────────────────────────────────────
         public bool          IsDisabled => _isDisabled;
         public RectTransform Rect       { get; private set; }
+        /// <summary>Root CanvasGroup used by cascade animations (slide + fade).</summary>
+        public CanvasGroup   Fader      { get; private set; }
 
         private void Awake()
         {
-            Rect = GetComponent<RectTransform>();
+            Rect  = GetComponent<RectTransform>();
+            Fader = GetComponent<CanvasGroup>();
             if (_label != null) _label.text = _displayName;
             ApplyDisabledVisual();
         }

@@ -170,7 +170,27 @@ namespace MK8.Menu.Editor
             var modeSelectScreen = BuildModeSelectHierarchy(canvasGO.transform, inputReader);
             modeSelectScreen.gameObject.SetActive(false);
 
-            // ── White Overlay (alpha=1 on load; FrontendFlow + screens share it) ──
+            // ── SpeedSelectScreen hierarchy ───────────────────────────────────────
+            var speedSelectScreen = BuildSpeedSelectHierarchy(canvasGO.transform, inputReader);
+            speedSelectScreen.gameObject.SetActive(false);
+
+            // ── CharacterSelectScreen hierarchy ───────────────────────────────────
+            var charSelectScreen = BuildCharacterSelectHierarchy(canvasGO.transform, inputReader);
+            charSelectScreen.gameObject.SetActive(false);
+
+            // ── KartPartsSelectScreen hierarchy ───────────────────────────────────
+            var kartPartsScreen = BuildKartPartsSelectHierarchy(canvasGO.transform, inputReader);
+            kartPartsScreen.gameObject.SetActive(false);
+
+            // ── CupSelectScreen hierarchy ─────────────────────────────────────────
+            var cupSelectScreen = BuildCupSelectHierarchy(canvasGO.transform, inputReader);
+            cupSelectScreen.gameObject.SetActive(false);
+
+            // ── ConfirmModalScreen hierarchy ──────────────────────────────────────
+            var confirmModalScreen = BuildConfirmModalHierarchy(canvasGO.transform, inputReader);
+            confirmModalScreen.gameObject.SetActive(false);
+
+            // ── White Overlay (alpha=1 on load; all screens share it) ─────────────
             var whiteGO    = CreateStretchPanel(canvasGO.transform, "WhiteOverlay", Color.white);
             var whiteGroup = whiteGO.AddComponent<CanvasGroup>();
             whiteGroup.alpha          = 1f;
@@ -179,22 +199,25 @@ namespace MK8.Menu.Editor
             whiteGO.transform.SetAsLastSibling();
 
             // ── Wire cross-screen references ──────────────────────────────────────
-            // TitleScreen → MainMenu
+            void Wire(UnityEngine.Object target, string next, MK8UIScreen nextScreen,
+                      string overlay = null, CanvasGroup cg = null)
             {
-                var so = new SerializedObject(titleScreen);
-                so.FindProperty("_nextScreen").objectReferenceValue = mainMenuScreen;
+                var so = new SerializedObject(target);
+                if (next    != null) so.FindProperty(next).objectReferenceValue    = nextScreen;
+                if (overlay != null) so.FindProperty(overlay).objectReferenceValue = cg;
                 so.ApplyModifiedPropertiesWithoutUndo();
             }
-            // MainMenu → ModeSelect + overlay
+
+            Wire(titleScreen,       "_nextScreen", mainMenuScreen);
+            Wire(mainMenuScreen,    "_nextScreen", modeSelectScreen,  "_sceneOverlay", whiteGroup);
+            Wire(modeSelectScreen,  "_nextScreen", speedSelectScreen);   // cascade exit, no overlay
+            Wire(speedSelectScreen, "_nextScreen", charSelectScreen,  "_sceneOverlay", whiteGroup);
+            Wire(charSelectScreen,  "_nextScreen", kartPartsScreen,   "_sceneOverlay", whiteGroup);
+            Wire(kartPartsScreen,   "_nextScreen", cupSelectScreen,    "_sceneOverlay", whiteGroup);
+            Wire(cupSelectScreen,   "_nextScreen", confirmModalScreen, "_sceneOverlay", whiteGroup);
+            // ConfirmModal: sceneOverlay = shared whiteGroup (for LoadScene fade)
             {
-                var so = new SerializedObject(mainMenuScreen);
-                so.FindProperty("_nextScreen").objectReferenceValue  = modeSelectScreen;
-                so.FindProperty("_sceneOverlay").objectReferenceValue = whiteGroup;
-                so.ApplyModifiedPropertiesWithoutUndo();
-            }
-            // ModeSelect → overlay (nextScreen wired in Bước 6)
-            {
-                var so = new SerializedObject(modeSelectScreen);
+                var so = new SerializedObject(confirmModalScreen);
                 so.FindProperty("_sceneOverlay").objectReferenceValue = whiteGroup;
                 so.ApplyModifiedPropertiesWithoutUndo();
             }
@@ -204,10 +227,15 @@ namespace MK8.Menu.Editor
             var flow   = flowGO.AddComponent<MK8FrontendFlow>();
 
             var soFlow = new SerializedObject(flow);
-            soFlow.FindProperty("_title").objectReferenceValue        = titleScreen;
-            soFlow.FindProperty("_mainMenu").objectReferenceValue     = mainMenuScreen;
-            soFlow.FindProperty("_modeSelect").objectReferenceValue   = modeSelectScreen;
-            soFlow.FindProperty("_whiteOverlay").objectReferenceValue = whiteGroup;
+            soFlow.FindProperty("_title").objectReferenceValue            = titleScreen;
+            soFlow.FindProperty("_mainMenu").objectReferenceValue         = mainMenuScreen;
+            soFlow.FindProperty("_modeSelect").objectReferenceValue       = modeSelectScreen;
+            soFlow.FindProperty("_speedSelect").objectReferenceValue      = speedSelectScreen;
+            soFlow.FindProperty("_charSelect").objectReferenceValue       = charSelectScreen;
+            soFlow.FindProperty("_kartPartsSelect").objectReferenceValue  = kartPartsScreen;
+            soFlow.FindProperty("_cupSelect").objectReferenceValue        = cupSelectScreen;
+            soFlow.FindProperty("_confirmModal").objectReferenceValue     = confirmModalScreen;
+            soFlow.FindProperty("_whiteOverlay").objectReferenceValue     = whiteGroup;
             soFlow.ApplyModifiedPropertiesWithoutUndo();
 
             // ── Save ──────────────────────────────────────────────────────────────
@@ -543,6 +571,12 @@ namespace MK8.Menu.Editor
             rect.anchoredPosition = new Vector2(0f, yPos);
             rect.sizeDelta        = new Vector2(0f, height);
 
+            // Root CanvasGroup — exposed as MK8UI_ModeItem.Fader for cascade animations
+            var rootCG               = go.AddComponent<CanvasGroup>();
+            rootCG.alpha             = 1f;
+            rootCG.interactable      = false;
+            rootCG.blocksRaycasts    = false;
+
             var item = go.AddComponent<MK8UI_ModeItem>();
 
             // BgNormal (white semi-transparent)
@@ -823,6 +857,650 @@ namespace MK8.Menu.Editor
             return screen;
         }
 
+        // ── SPEED SELECT DATA ────────────────────────────────────────────────────
+        private static readonly string[] SpeedNames =
+            { "50cc", "100cc", "150cc", "Mirror", "200cc" };
+        private static readonly Color[] SpeedBadge =
+        {
+            new Color(0.95f, 0.85f, 0.1f),  // 50cc   — yellow
+            new Color(0.95f, 0.55f, 0.1f),  // 100cc  — orange
+            new Color(0.85f, 0.2f,  0.2f),  // 150cc  — red
+            new Color(0.55f, 0.2f,  0.9f),  // Mirror — purple
+            new Color(0.2f,  0.1f,  0.2f),  // 200cc  — near-black
+        };
+        private static readonly Color[] SpeedPreview =
+        {
+            new Color(1f,   0.97f, 0.75f),  // 50cc   — warm yellow
+            new Color(1f,   0.88f, 0.72f),  // 100cc  — light orange
+            new Color(1f,   0.76f, 0.76f),  // 150cc  — light red
+            new Color(0.88f,0.76f, 1f   ),  // Mirror — light purple
+            new Color(0.72f,0.72f, 0.72f),  // 200cc  — silver-gray
+        };
+
+        private static readonly string[] SpeedTooltips =
+        {
+            "A slower, friendlier race.",
+            "Pick up the pace!",
+            "Full speed ahead!",
+            "Mirror world — all tracks flipped!",
+            "The fastest class. Good luck!",
+        };
+
+        private static MK8UI_SpeedSelectScreen BuildSpeedSelectHierarchy(
+            Transform canvasParent, MK8InputReader inputReader)
+        {
+            // Root
+            var rootGO   = new GameObject("SpeedSelectScreen");
+            rootGO.transform.SetParent(canvasParent, false);
+            var rootRect = rootGO.AddComponent<RectTransform>();
+            rootRect.anchorMin = Vector2.zero;
+            rootRect.anchorMax = Vector2.one;
+            rootRect.offsetMin = rootRect.offsetMax = Vector2.zero;
+            var rootCG   = rootGO.AddComponent<CanvasGroup>();
+            var screen   = rootGO.AddComponent<MK8UI_SpeedSelectScreen>();
+
+            // Background
+            CreateStretchPanel(rootGO.transform, "Background", new Color(0.96f, 0.96f, 0.96f));
+
+            // ── Left Panel (blue, 540px) ──────────────────────────────────────────
+            var leftGO   = new GameObject("LeftPanel");
+            leftGO.transform.SetParent(rootGO.transform, false);
+            var leftRect = leftGO.AddComponent<RectTransform>();
+            leftRect.anchorMin        = new Vector2(0f, 0f);
+            leftRect.anchorMax        = new Vector2(0f, 1f);
+            leftRect.pivot            = new Vector2(0f, 0.5f);
+            leftRect.anchoredPosition = Vector2.zero;
+            leftRect.sizeDelta        = new Vector2(540f, 0f);
+            leftGO.AddComponent<Image>().color = new Color(0f, 0.4f, 0.8f, 1f);
+
+            // Screen title
+            CreateTMPLabel(leftGO.transform, "ScreenTitle",
+                "SELECT SPEED CLASS", 22f, new Color(1f, 1f, 1f, 0.7f),
+                new Vector2(460f, 36f), new Vector2(230f, -30f));
+
+            // Speed items container (5 items)
+            var itemsCont = new GameObject("SpeedItemsContainer");
+            itemsCont.transform.SetParent(leftGO.transform, false);
+            var iRect = itemsCont.AddComponent<RectTransform>();
+            iRect.anchorMin = Vector2.zero;
+            iRect.anchorMax = Vector2.one;
+            iRect.offsetMin = new Vector2(44f, 100f);
+            iRect.offsetMax = new Vector2(-10f, -80f);
+
+            var speedItems = new MK8UI_ModeItem[5];
+            float ih   = 80f, igap = 10f;
+            float totalH = 5 * ih + 4 * igap;
+            float startY = totalH * 0.5f - ih * 0.5f;
+
+            for (int i = 0; i < 5; i++)
+            {
+                float yPos  = startY - i * (ih + igap);
+                var   mi    = CreateModeItem(itemsCont.transform, SpeedNames[i], false, yPos, ih);
+
+                // Coloured badge strip on left of item
+                var badgeGO   = new GameObject("Badge");
+                badgeGO.transform.SetParent(mi.gameObject.transform, false);
+                var badgeRect = badgeGO.AddComponent<RectTransform>();
+                badgeRect.anchorMin        = new Vector2(0f, 0f);
+                badgeRect.anchorMax        = new Vector2(0f, 1f);
+                badgeRect.pivot            = new Vector2(0f, 0.5f);
+                badgeRect.anchoredPosition = Vector2.zero;
+                badgeRect.sizeDelta        = new Vector2(12f, 0f);
+                badgeGO.AddComponent<Image>().color = SpeedBadge[i];
+
+                speedItems[i] = mi;
+            }
+
+            // Arrow indicator
+            var arrowGO = CreateArrowIndicator(leftGO.transform, "Arrow",
+                                               new Vector2(14f, startY), isLeft: true);
+            var arrowIndicator = arrowGO.GetComponent<MK8UI_ArrowIndicator>();
+
+            // ── Right Preview Area ─────────────────────────────────────────────────
+            var rightGO   = new GameObject("PreviewArea");
+            rightGO.transform.SetParent(rootGO.transform, false);
+            var rightRect = rightGO.AddComponent<RectTransform>();
+            rightRect.anchorMin = new Vector2(0f, 0f);
+            rightRect.anchorMax = new Vector2(1f, 1f);
+            rightRect.offsetMin = new Vector2(560f, 60f);
+            rightRect.offsetMax = new Vector2(-20f, -60f);
+
+            var previewPanels = new CanvasGroup[5];
+            TextMeshProUGUI tooltipText = null;
+
+            for (int i = 0; i < 5; i++)
+            {
+                var pGO   = new GameObject($"Preview_{SpeedNames[i]}");
+                pGO.transform.SetParent(rightGO.transform, false);
+                var pRect = pGO.AddComponent<RectTransform>();
+                pRect.anchorMin = Vector2.zero;
+                pRect.anchorMax = Vector2.one;
+                pRect.offsetMin = pRect.offsetMax = Vector2.zero;
+                previewPanels[i] = pGO.AddComponent<CanvasGroup>();
+                previewPanels[i].alpha = i == 0 ? 1f : 0f;
+                pGO.SetActive(i == 0);
+
+                pGO.AddComponent<Image>().color = SpeedPreview[i];
+
+                // Preview label
+                CreateTMPLabel(pGO.transform, "PreviewLabel",
+                    $"[{SpeedNames[i]} Preview]\n(replace with speed art / animation)",
+                    24f, new Color(0.2f, 0.2f, 0.2f),
+                    new Vector2(500f, 80f), new Vector2(0f, 40f));
+
+                // Tooltip overlay (top-right corner)
+                var tipGO   = new GameObject("TooltipOverlay");
+                tipGO.transform.SetParent(pGO.transform, false);
+                var tipRect = tipGO.AddComponent<RectTransform>();
+                tipRect.anchorMin        = new Vector2(1f, 1f);
+                tipRect.anchorMax        = new Vector2(1f, 1f);
+                tipRect.pivot            = new Vector2(1f, 1f);
+                tipRect.anchoredPosition = new Vector2(-10f, -10f);
+                tipRect.sizeDelta        = new Vector2(380f, 52f);
+                tipGO.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.6f);
+
+                if (i == 0)
+                {
+                    var tipLabel = CreateTMPLabel(tipGO.transform, "TooltipText",
+                        SpeedTooltips[0], 20f, Color.white,
+                        new Vector2(360f, 48f), Vector2.zero);
+                    tooltipText = tipLabel.GetComponent<TextMeshProUGUI>();
+                }
+            }
+
+            // ── Bottom Bar ─────────────────────────────────────────────────────────
+            var botGO   = new GameObject("BottomBar");
+            botGO.transform.SetParent(rootGO.transform, false);
+            var botRect = botGO.AddComponent<RectTransform>();
+            botRect.anchorMin        = new Vector2(0f, 0f);
+            botRect.anchorMax        = new Vector2(1f, 0f);
+            botRect.pivot            = new Vector2(0.5f, 0f);
+            botRect.anchoredPosition = Vector2.zero;
+            botRect.sizeDelta        = new Vector2(0f, 56f);
+            botGO.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.3f);
+
+            CreateTMPLabel(botGO.transform, "BackPrompt",
+                "◀  B", 24f, Color.white, new Vector2(100f, 48f), new Vector2(-880f, 0f));
+            CreateTMPLabel(botGO.transform, "ConfirmPrompt",
+                "Ⓐ  OK", 24f, Color.white, new Vector2(100f, 48f), new Vector2(880f, 0f));
+
+            // ── Wire MK8UI_SpeedSelectScreen ──────────────────────────────────────
+            var so = new SerializedObject(screen);
+            so.FindProperty("_canvasGroup").objectReferenceValue = rootCG;
+            so.FindProperty("_inputReader").objectReferenceValue = inputReader;
+            so.FindProperty("_arrow").objectReferenceValue       = arrowIndicator;
+            if (tooltipText != null)
+                so.FindProperty("_tooltipText").objectReferenceValue = tooltipText;
+
+            var itemsProp = so.FindProperty("_speedItems");
+            itemsProp.arraySize = 5;
+            for (int i = 0; i < 5; i++)
+                itemsProp.GetArrayElementAtIndex(i).objectReferenceValue = speedItems[i];
+
+            var previewProp = so.FindProperty("_previewPanels");
+            previewProp.arraySize = 5;
+            for (int i = 0; i < 5; i++)
+                previewProp.GetArrayElementAtIndex(i).objectReferenceValue = previewPanels[i];
+
+            // _sceneOverlay + _nextScreen wired after creation in BuildFrontendSceneInternal
+            so.ApplyModifiedPropertiesWithoutUndo();
+
+            return screen;
+        }
+
+        // ── CHARACTER SELECT ─────────────────────────────────────────────────────
+
+        private static MK8UI_CharacterSelectScreen BuildCharacterSelectHierarchy(
+            Transform canvasParent, MK8InputReader inputReader)
+        {
+            const int   Cols = 6, Rows = 5;
+            const float CW = 140f, CH = 110f, GX = 6f, GY = 6f;
+            float tW = Cols * CW + (Cols - 1) * GX;
+            float tH = Rows * CH + (Rows - 1) * GY;
+            float sX = -tW / 2f + CW / 2f;
+            float sY =  tH / 2f - CH / 2f;
+
+            var rootGO = new GameObject("CharacterSelectScreen");
+            rootGO.transform.SetParent(canvasParent, false);
+            var rootRect = rootGO.AddComponent<RectTransform>();
+            rootRect.anchorMin = Vector2.zero; rootRect.anchorMax = Vector2.one;
+            rootRect.offsetMin = rootRect.offsetMax = Vector2.zero;
+            var rootCG = rootGO.AddComponent<CanvasGroup>();
+            var screen = rootGO.AddComponent<MK8UI_CharacterSelectScreen>();
+
+            CreateStretchPanel(rootGO.transform, "Background", new Color(0.05f, 0.08f, 0.18f));
+
+            // Top bar
+            var topGO = new GameObject("TopBar"); topGO.transform.SetParent(rootGO.transform, false);
+            var topRect = topGO.AddComponent<RectTransform>();
+            topRect.anchorMin = new Vector2(0f, 1f); topRect.anchorMax = Vector2.one;
+            topRect.pivot = new Vector2(0.5f, 1f);
+            topRect.anchoredPosition = Vector2.zero; topRect.sizeDelta = new Vector2(0f, 80f);
+            topGO.AddComponent<Image>().color = new Color(0f, 0.28f, 0.58f);
+            CreateTMPLabel(topGO.transform, "Title", "CHOOSE YOUR CHARACTER",
+                28f, Color.white, new Vector2(700f, 60f), Vector2.zero);
+
+            // Character grid (left 62%)
+            var gridGO = new GameObject("CharGrid");
+            gridGO.transform.SetParent(rootGO.transform, false);
+            var gridRect = gridGO.AddComponent<RectTransform>();
+            gridRect.anchorMin = new Vector2(0f, 0f); gridRect.anchorMax = new Vector2(0.62f, 1f);
+            gridRect.offsetMin = new Vector2(20f, 70f); gridRect.offsetMax = new Vector2(0f, -90f);
+
+            var cells = new MK8UI_CharacterCell[Cols * Rows];
+            for (int r = 0; r < Rows; r++)
+                for (int c = 0; c < Cols; c++)
+                {
+                    int i = r * Cols + c;
+                    cells[i] = CreateCharCell(gridGO.transform, i,
+                        new Vector2(sX + c * (CW + GX), sY - r * (CH + GY)),
+                        new Vector2(CW, CH));
+                }
+
+            // Right preview panel (right 36%)
+            var prevGO = new GameObject("PreviewPanel");
+            prevGO.transform.SetParent(rootGO.transform, false);
+            var prevRect = prevGO.AddComponent<RectTransform>();
+            prevRect.anchorMin = new Vector2(0.64f, 0f); prevRect.anchorMax = Vector2.one;
+            prevRect.offsetMin = new Vector2(10f, 70f); prevRect.offsetMax = new Vector2(-20f, -90f);
+            prevGO.AddComponent<Image>().color = new Color(0.08f, 0.12f, 0.22f);
+
+            var portPlaceholderGO = new GameObject("PortraitPlaceholder");
+            portPlaceholderGO.transform.SetParent(prevGO.transform, false);
+            var ppRect = portPlaceholderGO.AddComponent<RectTransform>();
+            ppRect.anchorMin = ppRect.anchorMax = new Vector2(0.5f, 0.5f);
+            ppRect.anchoredPosition = new Vector2(0f, 80f); ppRect.sizeDelta = new Vector2(280f, 340f);
+            var portImg = portPlaceholderGO.AddComponent<Image>();
+            portImg.color = new Color(0.5f, 0.5f, 0.62f);
+
+            var prevNameGO  = CreateTMPLabel(prevGO.transform, "CharName", "Mario",
+                32f, Color.white, new Vector2(400f, 60f), new Vector2(0f, -130f));
+            var prevNameTMP = prevNameGO.GetComponent<TextMeshProUGUI>();
+
+            // Bottom bar
+            BuildBottomBar(rootGO.transform);
+
+            // Wire
+            var so = new SerializedObject(screen);
+            so.FindProperty("_canvasGroup").objectReferenceValue     = rootCG;
+            so.FindProperty("_inputReader").objectReferenceValue     = inputReader;
+            so.FindProperty("_previewPortrait").objectReferenceValue = portImg;
+            so.FindProperty("_previewName").objectReferenceValue     = prevNameTMP;
+            var cellsProp = so.FindProperty("_cells");
+            cellsProp.arraySize = cells.Length;
+            for (int i = 0; i < cells.Length; i++)
+                cellsProp.GetArrayElementAtIndex(i).objectReferenceValue = cells[i];
+            so.ApplyModifiedPropertiesWithoutUndo();
+            return screen;
+        }
+
+        private static MK8UI_CharacterCell CreateCharCell(
+            Transform parent, int idx, Vector2 pos, Vector2 size)
+        {
+            var go = new GameObject($"Cell_{idx:D2}");
+            go.transform.SetParent(parent, false);
+            var rect = go.AddComponent<RectTransform>();
+            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = pos; rect.sizeDelta = size;
+            var cell = go.AddComponent<MK8UI_CharacterCell>();
+
+            // Portrait background
+            var portGO = new GameObject("Portrait");
+            portGO.transform.SetParent(go.transform, false);
+            StretchRect(portGO);
+            var portImg = portGO.AddComponent<Image>();
+            portImg.color = new Color(0.5f, 0.5f, 0.6f); portImg.raycastTarget = false;
+
+            // Name strip (bottom 26px) — dark Image background
+            var nameGO = new GameObject("NameStrip");
+            nameGO.transform.SetParent(go.transform, false);
+            var nameRect = nameGO.AddComponent<RectTransform>();
+            nameRect.anchorMin = new Vector2(0f, 0f); nameRect.anchorMax = new Vector2(1f, 0f);
+            nameRect.pivot = new Vector2(0.5f, 0f);
+            nameRect.anchoredPosition = Vector2.zero; nameRect.sizeDelta = new Vector2(0f, 26f);
+            nameGO.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.55f);
+
+            // TMP label must be on a child — Image and TextMeshProUGUI both extend Graphic
+            var nameLabelGO = new GameObject("NameLabel");
+            nameLabelGO.transform.SetParent(nameGO.transform, false);
+            var nlRect = nameLabelGO.AddComponent<RectTransform>();
+            nlRect.anchorMin = Vector2.zero; nlRect.anchorMax = Vector2.one;
+            nlRect.offsetMin = nlRect.offsetMax = Vector2.zero;
+            var nameTMP = nameLabelGO.AddComponent<TextMeshProUGUI>();
+            nameTMP.text = "—"; nameTMP.fontSize = 10f; nameTMP.color = Color.white;
+            nameTMP.alignment = TextAlignmentOptions.Center; nameTMP.raycastTarget = false;
+
+            // Selection frame (gold, starts inactive)
+            var frameGO = new GameObject("SelectionFrame");
+            frameGO.transform.SetParent(go.transform, false);
+            StretchRect(frameGO);
+            var frameImg = frameGO.AddComponent<Image>();
+            frameImg.color = new Color(1f, 0.85f, 0f, 0.9f); frameImg.raycastTarget = false;
+            frameGO.SetActive(false);
+
+            // Lock overlay (dark, starts inactive)
+            var lockGO = new GameObject("LockOverlay");
+            lockGO.transform.SetParent(go.transform, false);
+            StretchRect(lockGO);
+            lockGO.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.65f);
+            lockGO.SetActive(false);
+
+            var so = new SerializedObject(cell);
+            so.FindProperty("_portrait").objectReferenceValue       = portImg;
+            so.FindProperty("_nameLabel").objectReferenceValue      = nameTMP;
+            so.FindProperty("_selectionFrame").objectReferenceValue = frameImg;
+            so.FindProperty("_lockOverlay").objectReferenceValue    = lockGO;
+            so.ApplyModifiedPropertiesWithoutUndo();
+            return cell;
+        }
+
+        // ── KART PARTS SELECT ────────────────────────────────────────────────────
+
+        private static MK8UI_KartPartsSelectScreen BuildKartPartsSelectHierarchy(
+            Transform canvasParent, MK8InputReader inputReader)
+        {
+            var rootGO = new GameObject("KartPartsSelectScreen");
+            rootGO.transform.SetParent(canvasParent, false);
+            var rootRect = rootGO.AddComponent<RectTransform>();
+            rootRect.anchorMin = Vector2.zero; rootRect.anchorMax = Vector2.one;
+            rootRect.offsetMin = rootRect.offsetMax = Vector2.zero;
+            var rootCG = rootGO.AddComponent<CanvasGroup>();
+            var screen = rootGO.AddComponent<MK8UI_KartPartsSelectScreen>();
+
+            CreateStretchPanel(rootGO.transform, "Background", new Color(0.06f, 0.07f, 0.15f));
+
+            // Top bar
+            var topGO = new GameObject("TopBar"); topGO.transform.SetParent(rootGO.transform, false);
+            var topRect = topGO.AddComponent<RectTransform>();
+            topRect.anchorMin = new Vector2(0f, 1f); topRect.anchorMax = Vector2.one;
+            topRect.pivot = new Vector2(0.5f, 1f);
+            topRect.anchoredPosition = Vector2.zero; topRect.sizeDelta = new Vector2(0f, 80f);
+            topGO.AddComponent<Image>().color = new Color(0f, 0.2f, 0.45f);
+            CreateTMPLabel(topGO.transform, "Title", "CHOOSE YOUR KART PARTS",
+                28f, Color.white, new Vector2(700f, 60f), Vector2.zero);
+
+            string[] colTitles = { "KART BODY", "WHEELS", "GLIDER" };
+            var columnPanels    = new CanvasGroup[3];
+            var itemNames       = new TextMeshProUGUI[3];
+            var itemIcons       = new Image[3];
+            var itemCountLabels = new TextMeshProUGUI[3];
+
+            for (int c = 0; c < 3; c++)
+            {
+                var colGO = new GameObject($"Column_{colTitles[c]}");
+                colGO.transform.SetParent(rootGO.transform, false);
+                var colRect = colGO.AddComponent<RectTransform>();
+                colRect.anchorMin = new Vector2(c / 3f, 0f);
+                colRect.anchorMax = new Vector2((c + 1) / 3f, 1f);
+                colRect.offsetMin = new Vector2(10f, 60f);
+                colRect.offsetMax = new Vector2(-10f, -90f);
+                colGO.AddComponent<Image>().color = new Color(0.1f, 0.12f, 0.24f, 0.8f);
+                var cg = colGO.AddComponent<CanvasGroup>();
+                cg.alpha = c == 0 ? 1f : 0.45f;
+                columnPanels[c] = cg;
+
+                CreateTMPLabel(colGO.transform, "ColTitle", colTitles[c], 22f,
+                    new Color(0.7f, 0.85f, 1f), new Vector2(460f, 48f), new Vector2(0f, 300f));
+                CreateTMPLabel(colGO.transform, "ArrowUp", "▲", 30f,
+                    new Color(1f, 1f, 1f, 0.6f), new Vector2(60f, 40f), new Vector2(0f, 210f));
+
+                var iconGO = new GameObject("ItemIcon");
+                iconGO.transform.SetParent(colGO.transform, false);
+                var iconRect = iconGO.AddComponent<RectTransform>();
+                iconRect.anchorMin = iconRect.anchorMax = new Vector2(0.5f, 0.5f);
+                iconRect.anchoredPosition = new Vector2(0f, 60f); iconRect.sizeDelta = new Vector2(200f, 200f);
+                var iconImg = iconGO.AddComponent<Image>(); iconImg.raycastTarget = false;
+                itemIcons[c] = iconImg;
+
+                var nmGO = CreateTMPLabel(colGO.transform, "ItemName", "—", 26f,
+                    Color.white, new Vector2(440f, 46f), new Vector2(0f, -80f));
+                itemNames[c] = nmGO.GetComponent<TextMeshProUGUI>();
+
+                var cntGO = CreateTMPLabel(colGO.transform, "CountLabel", "1 / 5", 20f,
+                    new Color(1f, 1f, 1f, 0.6f), new Vector2(160f, 36f), new Vector2(0f, -140f));
+                itemCountLabels[c] = cntGO.GetComponent<TextMeshProUGUI>();
+
+                CreateTMPLabel(colGO.transform, "ArrowDown", "▼", 30f,
+                    new Color(1f, 1f, 1f, 0.6f), new Vector2(60f, 40f), new Vector2(0f, -205f));
+            }
+
+            BuildBottomBar(rootGO.transform);
+
+            var so = new SerializedObject(screen);
+            so.FindProperty("_canvasGroup").objectReferenceValue = rootCG;
+            so.FindProperty("_inputReader").objectReferenceValue = inputReader;
+            void WireArray<T>(string propName, T[] arr) where T : UnityEngine.Object
+            {
+                var p = so.FindProperty(propName); p.arraySize = arr.Length;
+                for (int i = 0; i < arr.Length; i++) p.GetArrayElementAtIndex(i).objectReferenceValue = arr[i];
+            }
+            WireArray("_columnPanels",    columnPanels);
+            WireArray("_itemNames",       itemNames);
+            WireArray("_itemIcons",       itemIcons);
+            WireArray("_itemCountLabels", itemCountLabels);
+            so.ApplyModifiedPropertiesWithoutUndo();
+            return screen;
+        }
+
+        // ── CUP SELECT ───────────────────────────────────────────────────────────
+
+        private static MK8UI_CupSelectScreen BuildCupSelectHierarchy(
+            Transform canvasParent, MK8InputReader inputReader)
+        {
+            const int   GC = 4, GR = 3;
+            const float CW = 220f, CH = 130f, GX = 12f, GY = 12f;
+            float tW = GC * CW + (GC - 1) * GX;
+            float tH = GR * CH + (GR - 1) * GY;
+            float sX = -tW / 2f + CW / 2f;
+            float sY =  tH / 2f - CH / 2f;
+
+            var rootGO = new GameObject("CupSelectScreen");
+            rootGO.transform.SetParent(canvasParent, false);
+            var rootRect = rootGO.AddComponent<RectTransform>();
+            rootRect.anchorMin = Vector2.zero; rootRect.anchorMax = Vector2.one;
+            rootRect.offsetMin = rootRect.offsetMax = Vector2.zero;
+            var rootCG = rootGO.AddComponent<CanvasGroup>();
+            var screen = rootGO.AddComponent<MK8UI_CupSelectScreen>();
+
+            CreateStretchPanel(rootGO.transform, "Background", new Color(0.07f, 0.06f, 0.17f));
+
+            // Top bar
+            var topGO = new GameObject("TopBar"); topGO.transform.SetParent(rootGO.transform, false);
+            var topRect = topGO.AddComponent<RectTransform>();
+            topRect.anchorMin = new Vector2(0f, 1f); topRect.anchorMax = Vector2.one;
+            topRect.pivot = new Vector2(0.5f, 1f);
+            topRect.anchoredPosition = Vector2.zero; topRect.sizeDelta = new Vector2(0f, 80f);
+            topGO.AddComponent<Image>().color = new Color(0.2f, 0.08f, 0.38f);
+            CreateTMPLabel(topGO.transform, "Title", "SELECT CUP",
+                28f, Color.white, new Vector2(500f, 60f), Vector2.zero);
+
+            // Cup grid (left 60%)
+            var gridGO = new GameObject("CupGrid");
+            gridGO.transform.SetParent(rootGO.transform, false);
+            var gridRect = gridGO.AddComponent<RectTransform>();
+            gridRect.anchorMin = new Vector2(0f, 0f); gridRect.anchorMax = new Vector2(0.60f, 1f);
+            gridRect.offsetMin = new Vector2(20f, 70f); gridRect.offsetMax = new Vector2(0f, -90f);
+
+            var cupIcons  = new Image[GC * GR];
+            var cupNames  = new TextMeshProUGUI[GC * GR];
+            var cupFrames = new GameObject[GC * GR];
+
+            for (int r = 0; r < GR; r++)
+                for (int c = 0; c < GC; c++)
+                {
+                    int i = r * GC + c;
+                    var cellGO = new GameObject($"Cup_{i:D2}");
+                    cellGO.transform.SetParent(gridGO.transform, false);
+                    var cRect = cellGO.AddComponent<RectTransform>();
+                    cRect.anchorMin = cRect.anchorMax = new Vector2(0.5f, 0.5f);
+                    cRect.pivot = new Vector2(0.5f, 0.5f);
+                    cRect.anchoredPosition = new Vector2(sX + c * (CW + GX), sY - r * (CH + GY));
+                    cRect.sizeDelta = new Vector2(CW, CH);
+
+                    // Cell background (serves as the colored icon placeholder)
+                    var bgImg = cellGO.AddComponent<Image>();
+                    bgImg.color = new Color(0.12f, 0.10f, 0.25f); bgImg.raycastTarget = false;
+                    cupIcons[i] = bgImg;
+
+                    // Cup name label (bottom half)
+                    var nmGO = CreateTMPLabel(cellGO.transform, "CupName", $"Cup {i + 1}",
+                        16f, Color.white, new Vector2(CW - 8f, 38f), new Vector2(0f, -42f));
+                    cupNames[i] = nmGO.GetComponent<TextMeshProUGUI>();
+
+                    // Selection frame (gold border, starts inactive)
+                    var frameGO = new GameObject("SelectFrame");
+                    frameGO.transform.SetParent(cellGO.transform, false);
+                    StretchRect(frameGO);
+                    var fImg = frameGO.AddComponent<Image>();
+                    fImg.color = new Color(1f, 0.85f, 0f, 0.9f); fImg.raycastTarget = false;
+                    frameGO.SetActive(false);
+                    cupFrames[i] = frameGO;
+                }
+
+            // Track preview panel (right 38%)
+            var prevGO = new GameObject("TrackPreviewPanel");
+            prevGO.transform.SetParent(rootGO.transform, false);
+            var prevRect = prevGO.AddComponent<RectTransform>();
+            prevRect.anchorMin = new Vector2(0.62f, 0f); prevRect.anchorMax = Vector2.one;
+            prevRect.offsetMin = new Vector2(10f, 70f); prevRect.offsetMax = new Vector2(-20f, -90f);
+            prevGO.AddComponent<Image>().color = new Color(0.10f, 0.08f, 0.22f);
+
+            var cupLblGO  = CreateTMPLabel(prevGO.transform, "SelectedCupLabel", "Mushroom Cup",
+                26f, Color.white, new Vector2(520f, 50f), new Vector2(0f, 280f));
+            var cupLblTMP = cupLblGO.GetComponent<TextMeshProUGUI>();
+
+            var trackLabels = new TextMeshProUGUI[4];
+            for (int t = 0; t < 4; t++)
+            {
+                var tGO = CreateTMPLabel(prevGO.transform, $"Track_{t + 1}",
+                    $"{t + 1}.  Track Name", 22f,
+                    new Color(0.85f, 0.85f, 1f), new Vector2(520f, 42f),
+                    new Vector2(0f, 160f - t * 80f));
+                trackLabels[t] = tGO.GetComponent<TextMeshProUGUI>();
+            }
+
+            BuildBottomBar(rootGO.transform);
+
+            var so = new SerializedObject(screen);
+            so.FindProperty("_canvasGroup").objectReferenceValue      = rootCG;
+            so.FindProperty("_inputReader").objectReferenceValue      = inputReader;
+            so.FindProperty("_selectedCupLabel").objectReferenceValue = cupLblTMP;
+            void WireArr<T>(string propName, T[] arr) where T : UnityEngine.Object
+            {
+                var p = so.FindProperty(propName); p.arraySize = arr.Length;
+                for (int i = 0; i < arr.Length; i++) p.GetArrayElementAtIndex(i).objectReferenceValue = arr[i];
+            }
+            WireArr("_cupIcons",    cupIcons);
+            WireArr("_cupNames",    cupNames);
+            WireArr("_cupFrames",   cupFrames);
+            WireArr("_trackLabels", trackLabels);
+            so.ApplyModifiedPropertiesWithoutUndo();
+            return screen;
+        }
+
+        // ── CONFIRM MODAL ────────────────────────────────────────────────────────
+
+        private static MK8UI_ConfirmModalScreen BuildConfirmModalHierarchy(
+            Transform canvasParent, MK8InputReader inputReader)
+        {
+            // Root — full-canvas stretch + CanvasGroup (required by MK8UIScreen base)
+            var rootGO = new GameObject("ConfirmModalScreen");
+            rootGO.transform.SetParent(canvasParent, false);
+            var rootRect = rootGO.AddComponent<RectTransform>();
+            rootRect.anchorMin = Vector2.zero; rootRect.anchorMax = Vector2.one;
+            rootRect.offsetMin = rootRect.offsetMax = Vector2.zero;
+            var rootCG = rootGO.AddComponent<CanvasGroup>();
+            var screen = rootGO.AddComponent<MK8UI_ConfirmModalScreen>();
+
+            // Dark dim background (semi-transparent, lets previous screen show through)
+            var dimGO = CreateStretchPanel(rootGO.transform, "DimBackground",
+                new Color(0f, 0f, 0f, 0.72f));
+
+            // ── Centre card ───────────────────────────────────────────────────────
+            var cardGO = new GameObject("ConfirmCard");
+            cardGO.transform.SetParent(rootGO.transform, false);
+            var cardRect = cardGO.AddComponent<RectTransform>();
+            cardRect.anchorMin        = new Vector2(0.5f, 0.5f);
+            cardRect.anchorMax        = new Vector2(0.5f, 0.5f);
+            cardRect.pivot            = new Vector2(0.5f, 0.5f);
+            cardRect.anchoredPosition = Vector2.zero;
+            cardRect.sizeDelta        = new Vector2(820f, 560f);
+            var cardImg  = cardGO.AddComponent<Image>();
+            cardImg.color = new Color(0.06f, 0.08f, 0.18f, 0.97f);
+            cardImg.raycastTarget = false;
+
+            // Title bar (dark blue strip at top of card)
+            var titleBarGO = new GameObject("TitleBar");
+            titleBarGO.transform.SetParent(cardGO.transform, false);
+            var tbRect = titleBarGO.AddComponent<RectTransform>();
+            tbRect.anchorMin        = new Vector2(0f, 1f);
+            tbRect.anchorMax        = Vector2.one;
+            tbRect.pivot            = new Vector2(0.5f, 1f);
+            tbRect.anchoredPosition = Vector2.zero;
+            tbRect.sizeDelta        = new Vector2(0f, 70f);
+            titleBarGO.AddComponent<Image>().color = new Color(0f, 0.28f, 0.62f, 1f);
+            CreateTMPLabel(titleBarGO.transform, "CardTitle",
+                "CONFIRM SELECTION", 28f, Color.white,
+                new Vector2(760f, 56f), Vector2.zero);
+
+            // Summary text area (fills most of the card)
+            var summaryGO = new GameObject("SummaryText");
+            summaryGO.transform.SetParent(cardGO.transform, false);
+            var sRect = summaryGO.AddComponent<RectTransform>();
+            sRect.anchorMin        = new Vector2(0f, 0f);
+            sRect.anchorMax        = new Vector2(1f, 1f);
+            sRect.offsetMin        = new Vector2(48f, 72f);
+            sRect.offsetMax        = new Vector2(-48f, -76f);
+            var summaryTMP         = summaryGO.AddComponent<TextMeshProUGUI>();
+            summaryTMP.text        = "";
+            summaryTMP.fontSize    = 24f;
+            summaryTMP.color       = new Color(0.85f, 0.9f, 1f, 1f);
+            summaryTMP.alignment   = TextAlignmentOptions.TopLeft;
+            summaryTMP.lineSpacing = 12f;
+            summaryTMP.raycastTarget = false;
+
+            // Bottom prompt bar
+            var botGO = new GameObject("BottomBar");
+            botGO.transform.SetParent(cardGO.transform, false);
+            var botRect = botGO.AddComponent<RectTransform>();
+            botRect.anchorMin        = new Vector2(0f, 0f);
+            botRect.anchorMax        = new Vector2(1f, 0f);
+            botRect.pivot            = new Vector2(0.5f, 0f);
+            botRect.anchoredPosition = Vector2.zero;
+            botRect.sizeDelta        = new Vector2(0f, 58f);
+            botGO.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.4f);
+            CreateTMPLabel(botGO.transform, "BackPrompt",
+                "◀  B  Back", 24f, Color.white,
+                new Vector2(220f, 50f), new Vector2(-260f, 0f));
+            CreateTMPLabel(botGO.transform, "ConfirmPrompt",
+                "Ⓐ  START RACE!", 24f, new Color(1f, 0.88f, 0.2f),
+                new Vector2(260f, 50f), new Vector2(240f, 0f));
+
+            // Wire
+            var so = new SerializedObject(screen);
+            so.FindProperty("_canvasGroup").objectReferenceValue  = rootCG;
+            so.FindProperty("_inputReader").objectReferenceValue  = inputReader;
+            so.FindProperty("_summaryText").objectReferenceValue  = summaryTMP;
+            // _sceneOverlay wired to shared WhiteOverlay in BuildFrontendSceneInternal
+            so.ApplyModifiedPropertiesWithoutUndo();
+
+            return screen;
+        }
+
+        /// <summary>Shared bottom-bar helper (B / A prompts).</summary>
+        private static void BuildBottomBar(Transform parent)
+        {
+            var botGO = new GameObject("BottomBar"); botGO.transform.SetParent(parent, false);
+            var botRect = botGO.AddComponent<RectTransform>();
+            botRect.anchorMin = Vector2.zero; botRect.anchorMax = new Vector2(1f, 0f);
+            botRect.pivot = new Vector2(0.5f, 0f); botRect.anchoredPosition = Vector2.zero;
+            botRect.sizeDelta = new Vector2(0f, 60f);
+            botGO.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.35f);
+            CreateTMPLabel(botGO.transform, "BackPrompt",    "◀  B",  24f, Color.white, new Vector2(100f, 48f), new Vector2(-880f, 0f));
+            CreateTMPLabel(botGO.transform, "ConfirmPrompt", "Ⓐ  OK", 24f, Color.white, new Vector2(100f, 48f), new Vector2( 880f, 0f));
+        }
+
         private static void StretchRect(GameObject go)
         {
             var r    = go.AddComponent<RectTransform>();
@@ -835,18 +1513,104 @@ namespace MK8.Menu.Editor
         {
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
-            CreateCamera("Main Camera", Color.white);
+            // Camera (dark background so white fade-in reads correctly)
+            CreateCamera("Main Camera", new Color(0.04f, 0.05f, 0.12f));
+            CreateEventSystem();
 
+            // Input Reader
+            var inputReaderGO = new GameObject("InputReader");
+            var inputReader   = inputReaderGO.AddComponent<MK8InputReader>();
+            var actionsAsset  = AssetDatabase.LoadAssetAtPath<InputActionAsset>(
+                "Assets/_MK8Menu/MK8MenuControls.inputactions");
+            if (actionsAsset != null)
+            {
+                var soIR = new SerializedObject(inputReader);
+                soIR.FindProperty("_actions").objectReferenceValue = actionsAsset;
+                soIR.ApplyModifiedPropertiesWithoutUndo();
+            }
+
+            // Canvas
             var canvasGO = CreateCanvas("Canvas_Loading");
 
-            CreateStretchPanel(canvasGO.transform, "Background", Color.white);
+            // Dark background
+            CreateStretchPanel(canvasGO.transform, "Background", new Color(0.04f, 0.05f, 0.12f));
 
-            CreateTMPLabel(canvasGO.transform, "PlaceholderLabel",
-                           "MK8Menu_Loading\n[Placeholder — Bước 11 sẽ thêm kart parade]",
-                           fontSize: 32f,
-                           color: new Color(0.2f, 0.2f, 0.2f, 1f),
-                           size: new Vector2(800f, 120f),
-                           anchoredPos: Vector2.zero);
+            // ── Left: kart parade placeholder ────────────────────────────────────
+            var paradeGO   = new GameObject("KartParadePlaceholder");
+            paradeGO.transform.SetParent(canvasGO.transform, false);
+            var paradeRect = paradeGO.AddComponent<RectTransform>();
+            paradeRect.anchorMin        = new Vector2(0f, 0.1f);
+            paradeRect.anchorMax        = new Vector2(0.55f, 0.9f);
+            paradeRect.offsetMin        = new Vector2(40f, 0f);
+            paradeRect.offsetMax        = new Vector2(-20f, 0f);
+            var paradeImg  = paradeGO.AddComponent<Image>();
+            paradeImg.color = new Color(0.09f, 0.11f, 0.24f);
+            paradeImg.raycastTarget = false;
+            CreateTMPLabel(paradeGO.transform, "ParadeLabel",
+                "[Kart Parade Placeholder]\n(replace with kart animation)",
+                26f, new Color(0.5f, 0.55f, 0.7f),
+                new Vector2(480f, 100f), Vector2.zero);
+
+            // ── Right: selection summary ──────────────────────────────────────────
+            var rightGO   = new GameObject("SelectionSummaryPanel");
+            rightGO.transform.SetParent(canvasGO.transform, false);
+            var rightRect = rightGO.AddComponent<RectTransform>();
+            rightRect.anchorMin        = new Vector2(0.57f, 0.1f);
+            rightRect.anchorMax        = new Vector2(1f, 0.9f);
+            rightRect.offsetMin        = new Vector2(20f, 0f);
+            rightRect.offsetMax        = new Vector2(-40f, 0f);
+            rightGO.AddComponent<Image>().color = new Color(0.07f, 0.09f, 0.20f, 0.9f);
+
+            // Selection label (populated at runtime by MK8LoadingFlow)
+            var selLblGO = new GameObject("SelectionLabel");
+            selLblGO.transform.SetParent(rightGO.transform, false);
+            var slRect = selLblGO.AddComponent<RectTransform>();
+            slRect.anchorMin        = new Vector2(0f, 0.3f);
+            slRect.anchorMax        = Vector2.one;
+            slRect.offsetMin        = new Vector2(28f, 0f);
+            slRect.offsetMax        = new Vector2(-28f, -20f);
+            var selTMP              = selLblGO.AddComponent<TextMeshProUGUI>();
+            selTMP.text             = "";
+            selTMP.fontSize         = 22f;
+            selTMP.color            = new Color(0.85f, 0.9f, 1f);
+            selTMP.alignment        = TextAlignmentOptions.TopLeft;
+            selTMP.lineSpacing      = 10f;
+            selTMP.raycastTarget    = false;
+
+            // Status label — "Loading…" / "Press A to start the race!"
+            var statusGO   = new GameObject("StatusLabel");
+            statusGO.transform.SetParent(rightGO.transform, false);
+            var stRect     = statusGO.AddComponent<RectTransform>();
+            stRect.anchorMin        = new Vector2(0f, 0f);
+            stRect.anchorMax        = new Vector2(1f, 0.28f);
+            stRect.offsetMin        = new Vector2(20f, 10f);
+            stRect.offsetMax        = new Vector2(-20f, 0f);
+            var statusTMP           = statusGO.AddComponent<TextMeshProUGUI>();
+            statusTMP.text          = "Loading…";
+            statusTMP.fontSize      = 28f;
+            statusTMP.color         = new Color(1f, 0.9f, 0.3f);
+            statusTMP.alignment     = TextAlignmentOptions.Bottom;
+            statusTMP.fontStyle     = FontStyles.Bold;
+            statusTMP.raycastTarget = false;
+
+            // ── White Fade Overlay (alpha=1 on scene open; fades out in Start()) ──
+            var overlayGO = CreateStretchPanel(canvasGO.transform, "FadeOverlay", Color.white);
+            var overlayGrp = overlayGO.AddComponent<CanvasGroup>();
+            overlayGrp.alpha          = 1f;
+            overlayGrp.interactable   = false;
+            overlayGrp.blocksRaycasts = false;
+            overlayGO.transform.SetAsLastSibling();
+
+            // ── MK8LoadingFlow ────────────────────────────────────────────────────
+            var flowGO = new GameObject("LoadingFlow");
+            var flow   = flowGO.AddComponent<MK8LoadingFlow>();
+
+            var soFlow = new SerializedObject(flow);
+            soFlow.FindProperty("_fadeOverlay").objectReferenceValue    = overlayGrp;
+            soFlow.FindProperty("_statusLabel").objectReferenceValue    = statusTMP;
+            soFlow.FindProperty("_selectionLabel").objectReferenceValue = selTMP;
+            soFlow.FindProperty("_inputReader").objectReferenceValue    = inputReader;
+            soFlow.ApplyModifiedPropertiesWithoutUndo();
 
             var path = $"{ScenesFolder}/{LoadingScene}.unity";
             EditorSceneManager.SaveScene(scene, path);

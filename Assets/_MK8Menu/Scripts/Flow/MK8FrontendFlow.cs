@@ -7,28 +7,25 @@ namespace MK8.Menu
     /// <summary>
     /// Top-level coordinator for the MK8Menu_Frontend scene.
     /// Manages scene-open fade-in and exposes navigation methods to each UIScreen.
-    ///
-    /// Screens are registered here as SerializeFields and wired in Inspector / SceneBuilder.
     /// Section 6.2 of mk8_clone_prompt.md.
     /// </summary>
     public class MK8FrontendFlow : MonoBehaviour
     {
-        // ── Screens (one added per step) ─────────────────────────────────────────
         [Header("Screens")]
-        [SerializeField] private MK8UI_TitleScreen      _title;       // Bước 3
-        [SerializeField] private MK8UI_MainMenuScreen   _mainMenu;    // Bước 4
-        [SerializeField] private MK8UI_ModeSelectScreen _modeSelect;  // Bước 5
-        // Bước 6: [SerializeField] private MK8UI_SpeedSelectScreen _speedSelect;
-        // ...
+        [SerializeField] private MK8UI_TitleScreen           _title;
+        [SerializeField] private MK8UI_MainMenuScreen        _mainMenu;
+        [SerializeField] private MK8UI_ModeSelectScreen      _modeSelect;
+        [SerializeField] private MK8UI_SpeedSelectScreen     _speedSelect;
+        [SerializeField] private MK8UI_CharacterSelectScreen _charSelect;
+        [SerializeField] private MK8UI_KartPartsSelectScreen _kartPartsSelect;
+        [SerializeField] private MK8UI_CupSelectScreen       _cupSelect;
+        [SerializeField] private MK8UI_ConfirmModalScreen    _confirmModal;
 
-        // ── Shared canvas overlay (white flash between screens) ──────────────────
         [Header("Scene Overlay")]
         [SerializeField] private CanvasGroup _whiteOverlay;
 
         [Header("Timing")]
         [SerializeField] private float _openFadeDuration = 0.8f;
-
-        // ── Unity callbacks ──────────────────────────────────────────────────────
 
         private void Start()
         {
@@ -42,34 +39,52 @@ namespace MK8.Menu
                 _whiteOverlay.DOFade(0f, _openFadeDuration).SetEase(Ease.InOutSine);
             }
 
-            if (_title != null)
-                MK8UIScreen.Focus(_title);
-            else
-                Debug.LogError("[MK8FrontendFlow] _title is not assigned.");
+            if (_title != null) MK8UIScreen.Focus(_title);
+            else Debug.LogError("[MK8FrontendFlow] _title not assigned.");
         }
 
         // ── Public navigation API ─────────────────────────────────────────────────
 
         public void GoToMainMenu()
         {
-            if (_mainMenu != null)
-                MK8UIScreen.Focus(_mainMenu);
-            else
-                Debug.LogWarning("[MK8FrontendFlow] _mainMenu not assigned.");
+            if (_mainMenu != null) MK8UIScreen.Focus(_mainMenu);
+            else Debug.LogWarning("[MK8FrontendFlow] _mainMenu not assigned.");
         }
 
         public void GoToModeSelect()
         {
-            if (_modeSelect != null)
-                MK8UIScreen.Focus(_modeSelect);
-            else
-                Debug.LogWarning("[MK8FrontendFlow] _modeSelect not assigned.");
+            if (_modeSelect != null) MK8UIScreen.Focus(_modeSelect);
+            else Debug.LogWarning("[MK8FrontendFlow] _modeSelect not assigned.");
         }
 
         public void GoToSpeedSelect()
         {
-            // TODO Bước 6
-            Debug.Log("[MK8FrontendFlow] GoToSpeedSelect — Bước 6.");
+            if (_speedSelect != null) MK8UIScreen.Focus(_speedSelect);
+            else Debug.LogWarning("[MK8FrontendFlow] _speedSelect not assigned.");
+        }
+
+        public void GoToCharacterSelect()
+        {
+            if (_charSelect != null) MK8UIScreen.Focus(_charSelect);
+            else Debug.LogWarning("[MK8FrontendFlow] _charSelect not assigned.");
+        }
+
+        public void GoToKartPartsSelect()
+        {
+            if (_kartPartsSelect != null) MK8UIScreen.Focus(_kartPartsSelect);
+            else Debug.LogWarning("[MK8FrontendFlow] _kartPartsSelect not assigned.");
+        }
+
+        public void GoToCupSelect()
+        {
+            if (_cupSelect != null) MK8UIScreen.Focus(_cupSelect);
+            else Debug.LogWarning("[MK8FrontendFlow] _cupSelect not assigned.");
+        }
+
+        public void GoToConfirmModal()
+        {
+            if (_confirmModal != null) MK8UIScreen.Focus(_confirmModal);
+            else Debug.LogWarning("[MK8FrontendFlow] _confirmModal not assigned.");
         }
     }
 }

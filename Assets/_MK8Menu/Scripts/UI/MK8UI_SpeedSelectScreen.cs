@@ -1,56 +1,69 @@
 using DG.Tweening;
+using MK8.Shared;
 using TMPro;
 using UnityEngine;
 
 namespace MK8.Menu.UI
 {
     /// <summary>
-    /// Mode Select: Grand Prix / Time Trials / VS Race / Battle.
-    /// Left panel = 4 mode items + arrow. Right panel = preview + tooltip.
-    /// A = confirm (cascade exit → Speed Select), B = back (→ Main Menu).
-    /// Section 5.4 — Bước 5 / updated Bước 6 (cascade exit animation).
+    /// Speed Select: 50cc / 100cc / 150cc / Mirror / 200cc.
+    /// Left panel = 5 speed items with cascade-IN entry from the right.
+    /// Right panel = preview image per speed class.
+    /// A = confirm (→ Character Select, Bước 7). B = back (→ Mode Select).
+    /// Section 5.5 — Bước 6.
     /// </summary>
-    public class MK8UI_ModeSelectScreen : MK8UIScreen
+    public class MK8UI_SpeedSelectScreen : MK8UIScreen
     {
-        // ── Mode Items ───────────────────────────────────────────────────────────
-        [Header("Mode Items (0=GrandPrix … 3=Battle)")]
-        [SerializeField] private MK8UI_ModeItem[] _modeItems;   // exactly 4
+        // ── Speed Items ──────────────────────────────────────────────────────────
+        [Header("Speed Items (0=50cc … 4=200cc)")]
+        [SerializeField] private MK8UI_ModeItem[] _speedItems;   // exactly 5
 
         // ── Arrow ────────────────────────────────────────────────────────────────
         [Header("Arrow Indicator")]
         [SerializeField] private MK8UI_ArrowIndicator _arrow;
 
         // ── Preview Panels ───────────────────────────────────────────────────────
-        [Header("Preview Panels (one CanvasGroup per mode)")]
+        [Header("Preview Panels (one CanvasGroup per speed class)")]
         [SerializeField] private CanvasGroup[] _previewPanels;
 
         // ── Tooltip ───────────────────────────────────────────────────────────────
         [Header("Tooltip Text (overlay on preview)")]
         [SerializeField] private TextMeshProUGUI _tooltipText;
 
+        // ── Transition Overlay ────────────────────────────────────────────────────
+        [Header("Scene Transition Overlay (shared WhiteOverlay)")]
+        [SerializeField] private CanvasGroup _sceneOverlay;
+
         // ── Input / Navigation ────────────────────────────────────────────────────
         [Header("Input")]
         [SerializeField] private MK8InputReader _inputReader;
 
         [Header("Navigation")]
-        /// <summary>SpeedSelectScreen — wired in Bước 6.</summary>
+        /// <summary>CharacterSelectScreen — wired in Bước 7.</summary>
         [SerializeField] private MK8UIScreen _nextScreen;
 
-        // ── Mode meta (must match array order) ────────────────────────────────────
+        // ── Speed meta ────────────────────────────────────────────────────────────
         private static readonly string[] Tooltips =
         {
-            "Go for gold in a 4-race cup!",
-            "Race alone for new records!",
-            "Race using custom rules!",
-            "Pop your rivals' balloons!",
+            "A slower, friendlier race.",
+            "Pick up the pace!",
+            "Full speed ahead!",
+            "Mirror world — all tracks flipped!",
+            "The fastest class. Good luck!",
         };
 
         // ── State ─────────────────────────────────────────────────────────────────
-        private int      _selectedIndex;
-        private bool     _acceptInput;
-        private float    _navCooldown;
+        private int       _selectedIndex;
+        private bool      _acceptInput;
+        private float     _navCooldown;
         private Vector2[] _itemRestPositions;   // cached once on first OnShow
         private const float NavDelay = 0.15f;
+
+        // Cascade entry constants
+        private const float EntrySlideOffset = 800f;   // start X offset (right of screen)
+        private const float EntrySlideDur    = 0.30f;
+        private const float EntryFadeDur     = 0.25f;
+        private const float EntryStagger     = 0.06f;
 
         // ── MK8UIScreen overrides ─────────────────────────────────────────────────
 
@@ -60,35 +73,69 @@ namespace MK8.Menu.UI
             _navCooldown   = 0f;
             _selectedIndex = 0;
 
-            // ── Cache item rest positions on first visit ──────────────────────────
-            if (_itemRestPositions == null && _modeItems != null)
+            if (_sceneOverlay != null)
             {
-                _itemRestPositions = new Vector2[_modeItems.Length];
-                for (int i = 0; i < _modeItems.Length; i++)
-                    if (_modeItems[i]?.Rect != null)
-                        _itemRestPositions[i] = _modeItems[i].Rect.anchoredPosition;
+                _sceneOverlay.alpha          = 0f;
+                _sceneOverlay.interactable   = false;
+                _sceneOverlay.blocksRaycasts = false;
             }
 
-            // ── Reset items to rest positions (they may be off-screen if Back was pressed) ─
-            for (int i = 0; i < (_modeItems?.Length ?? 0); i++)
+            // ── Cache item rest positions on first visit ──────────────────────────
+            if (_itemRestPositions == null && _speedItems != null)
             {
-                var mi = _modeItems[i];
+                _itemRestPositions = new Vector2[_speedItems.Length];
+                for (int i = 0; i < _speedItems.Length; i++)
+                    if (_speedItems[i]?.Rect != null)
+                        _itemRestPositions[i] = _speedItems[i].Rect.anchoredPosition;
+            }
+
+            // ── Position all items off-screen right, alpha 0 ──────────────────────
+            for (int i = 0; i < (_speedItems?.Length ?? 0); i++)
+            {
+                var mi = _speedItems[i];
                 if (mi == null) continue;
-                if (mi.Rect != null && _itemRestPositions != null)
-                    mi.Rect.anchoredPosition = _itemRestPositions[i];
+                var rest = _itemRestPositions != null ? _itemRestPositions[i] : mi.Rect.anchoredPosition;
+                if (mi.Rect != null)
+                    mi.Rect.anchoredPosition = new Vector2(rest.x + EntrySlideOffset, rest.y);
                 if (mi.Fader != null)
-                    mi.Fader.alpha = 1f;
+                    mi.Fader.alpha = 0f;
                 mi.SetSelected(i == 0);
             }
 
             InitPreviews(0);
             UpdateTooltip(0);
 
-            SnapArrowToSelected();
-            _arrow?.Show(0f);
-            _arrow?.StartGlow();
+            // ── Cascade items in from right ───────────────────────────────────────
+            for (int i = 0; i < (_speedItems?.Length ?? 0); i++)
+            {
+                var mi = _speedItems[i];
+                if (mi?.Rect == null) continue;
 
-            DOVirtual.DelayedCall(0.3f, () => _acceptInput = true);
+                float   delay = i * EntryStagger;
+                Vector2 rest  = _itemRestPositions != null
+                    ? _itemRestPositions[i]
+                    : mi.Rect.anchoredPosition;
+
+                mi.Rect.DOAnchorPos(rest, EntrySlideDur)
+                    .SetDelay(delay)
+                    .SetEase(Ease.OutCubic);
+
+                if (mi.Fader != null)
+                    mi.Fader.DOFade(1f, EntryFadeDur).SetDelay(delay);
+            }
+
+            // Show arrow after last item arrives
+            float arrowDelay = (_speedItems?.Length ?? 0) * EntryStagger + EntrySlideDur * 0.5f;
+            DOVirtual.DelayedCall(arrowDelay, () =>
+            {
+                SnapArrowToSelected();
+                _arrow?.Show(0f);
+                _arrow?.StartGlow();
+            });
+
+            // Accept input after the full cascade has settled
+            float totalDuration = ((_speedItems?.Length ?? 0) - 1) * EntryStagger + EntrySlideDur + 0.1f;
+            DOVirtual.DelayedCall(totalDuration, () => _acceptInput = true);
         }
 
         public override void OnHide()
@@ -97,12 +144,12 @@ namespace MK8.Menu.UI
             DOTween.Kill(gameObject);
             _arrow?.StopGlow();
             // Kill all running item tweens (Rect + Fader + gameObject)
-            if (_modeItems != null)
-                foreach (var mi in _modeItems)
+            if (_speedItems != null)
+                foreach (var mi in _speedItems)
                 {
                     if (mi == null) continue;
-                    if (mi.Rect   != null) DOTween.Kill(mi.Rect);
-                    if (mi.Fader  != null) DOTween.Kill(mi.Fader);
+                    if (mi.Rect  != null) DOTween.Kill(mi.Rect);
+                    if (mi.Fader != null) DOTween.Kill(mi.Fader);
                     DOTween.Kill(mi.gameObject);
                 }
         }
@@ -128,15 +175,16 @@ namespace MK8.Menu.UI
 
         private void Navigate(int dir)
         {
-            int count    = _modeItems.Length;
+            int count = _speedItems?.Length ?? 0;
             if (count == 0) return;
+
             int newIndex = (_selectedIndex + dir + count) % count;
             if (newIndex == _selectedIndex) return;
 
-            _modeItems[_selectedIndex]?.SetSelected(false);
+            _speedItems[_selectedIndex]?.SetSelected(false);
             int prev       = _selectedIndex;
             _selectedIndex = newIndex;
-            _modeItems[_selectedIndex]?.SetSelected(true);
+            _speedItems[_selectedIndex]?.SetSelected(true);
 
             AnimateArrowToSelected();
             CrossfadePreview(prev, _selectedIndex);
@@ -151,40 +199,33 @@ namespace MK8.Menu.UI
             item?.PlayKick();
             _arrow?.Hide();
 
-            // ── Cascade exit: items slide left + fade, staggered ──────────────────
-            const float stagger   = 0.06f;
-            const float slideDur  = 0.28f;
-            const float fadeDur   = 0.22f;
-            const float slideXOff = -700f;
+            // Persist the player's speed class choice
+            MK8PlayerSelection.SpeedClass = (MK8SpeedClass)_selectedIndex;
 
-            var exitSeq = DOTween.Sequence();
-            for (int i = 0; i < _modeItems.Length; i++)
+            if (_sceneOverlay != null)
             {
-                var mi = _modeItems[i];
-                if (mi?.Rect == null) continue;
-
-                float delay  = i * stagger;
-                var   rest   = _itemRestPositions != null
-                    ? _itemRestPositions[i]
-                    : mi.Rect.anchoredPosition;
-                var   target = new Vector2(rest.x + slideXOff, rest.y);
-
-                exitSeq.Insert(delay,
-                    mi.Rect.DOAnchorPos(target, slideDur).SetEase(Ease.InCubic));
-
-                if (mi.Fader != null)
-                    exitSeq.Insert(delay,
-                        mi.Fader.DOFade(0f, fadeDur));
+                _sceneOverlay.blocksRaycasts = true;
+                _sceneOverlay
+                    .DOFade(1f, 0.35f)
+                    .SetDelay(0.1f)
+                    .OnComplete(() =>
+                    {
+                        SwitchToNext();
+                        _sceneOverlay
+                            .DOFade(0f, 0.35f)
+                            .OnComplete(() => _sceneOverlay.blocksRaycasts = false);
+                    });
             }
-
-            exitSeq.OnComplete(SwitchToNext);
+            else
+            {
+                SwitchToNext();
+            }
         }
 
         private void OnBack()
         {
             _acceptInput = false;
             _arrow?.Hide(0.15f);
-            // MK8UIScreen.Back() restores the previous screen (MainMenuScreen)
             Back();
         }
 
@@ -193,16 +234,16 @@ namespace MK8.Menu.UI
             if (_nextScreen != null)
                 Focus(_nextScreen);
             else
-                Debug.Log("[MK8UI_ModeSelectScreen] _nextScreen not assigned yet (Bước 6).");
+                Debug.Log("[MK8UI_SpeedSelectScreen] _nextScreen not assigned yet (Bước 7).");
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────────
 
         private MK8UI_ModeItem GetSelectedItem()
         {
-            if (_modeItems == null || _selectedIndex < 0 || _selectedIndex >= _modeItems.Length)
+            if (_speedItems == null || _selectedIndex < 0 || _selectedIndex >= _speedItems.Length)
                 return null;
-            return _modeItems[_selectedIndex];
+            return _speedItems[_selectedIndex];
         }
 
         private void SnapArrowToSelected()
